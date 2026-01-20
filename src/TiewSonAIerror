@@ -49,6 +49,21 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
     const isWakeWordActive = useRef(false);
     const isMobileDevice = useRef(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 
+    // เพิ่มก่อน toggleListening
+    const requestMicrophonePermission = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop()); // ปิดทันทีหลังได้สิทธิ์
+            return true;
+        } catch (error) {
+            console.error('Microphone permission denied:', error);
+            alert(language === 'th'
+                ? 'กรุณาอนุญาตการใช้ไมค์ในเบราว์เซอร์'
+                : 'Please allow microphone access in browser');
+            return false;
+        }
+    };
+
     // ========================== SPEECH SYNTHESIS ==========================
     const speak = useCallback((text) => {
         if (!('speechSynthesis' in window)) return;
@@ -84,19 +99,11 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                         setMascotAnimation('idle');
                         return;
                     }
-                    const voices = window.speechSynthesis.getVoices();
-                    const femaleVoice = voices.find(voice =>
-                        (voice.lang === 'th-TH' || voice.lang === 'th_TH') &&
-                        voice.name.toLowerCase().includes('female')
-                    );
 
-                    if (femaleVoice) {
-                        utterance.voice = femaleVoice;
-                    }
                     const utterance = new SpeechSynthesisUtterance(chunks[currentIndex]);
                     utterance.lang = langCodes[language] || 'th-TH';
-                    utterance.rate = 1.05;
-                    utterance.pitch = 1.25;
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.2;
                     utterance.volume = 1.0;
 
                     utterance.onstart = () => {
@@ -161,6 +168,16 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
 
     // ========================== iOS TTS INITIALIZATION ==========================
     useEffect(() => {
+        
+        // ตรวจสอบว่ามีไมค์หรือไม่
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                console.log('✅ Microphone available');
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(err => {
+                console.error('❌ No microphone access:', err);
+            });
         if (isMobileDevice.current && 'speechSynthesis' in window) {
             const initTTS = () => {
                 const utterance = new SpeechSynthesisUtterance('');
@@ -190,88 +207,125 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
         }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
         try {
-            const wakeWord = new SpeechRecognition();
-            wakeWord.continuous = true;
-            wakeWord.interimResults = false;
-            wakeWord.lang = 'th-TH';
+            // ========== WAKE WORD (ไม่รองรับบน iOS) ==========
+            if (!isIOS) {
+                const wakeWord = new SpeechRecognition();
+                wakeWord.continuous = true;
+                wakeWord.interimResults = false;
+                wakeWord.lang = 'th-TH';
 
-            wakeWord.onstart = () => {
-                isWakeWordActive.current = true;
-                setIsWakeWordListening(true);
-            };
+                wakeWord.onstart = () => {
+                    isWakeWordActive.current = true;
+                    setIsWakeWordListening(true);
+                };
 
-            wakeWord.onend = () => {
-                isWakeWordActive.current = false;
-                setIsWakeWordListening(false);
-            };
+                wakeWord.onend = () => {
+                    isWakeWordActive.current = false;
+                    setIsWakeWordListening(false);
+                };
 
-            wakeWord.onresult = (event) => {
-                const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+                wakeWord.onresult = (event) => {
+                    const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
 
-                if (WAKE_WORDS.some(word => transcript.includes(word))) {
-                    console.log('✅ Wake word detected:', transcript);
-                    setMascotAnimation('bounce');
-                    setTimeout(() => setMascotAnimation('idle'), 1000);
+                    if (WAKE_WORDS.some(word => transcript.includes(word))) {
+                        console.log('✅ Wake word detected:', transcript);
+                        setMascotAnimation('bounce');
+                        setTimeout(() => setMascotAnimation('idle'), 1000);
 
-                    setIsExpanded(true);
-                    const greeting = GREETINGS[language];
-                    setMessages([{ role: 'assistant', content: greeting }]);
-                    speak(greeting);
+                        setIsExpanded(true);
+                        const greeting = GREETINGS[language];
+                        setMessages([{ role: 'assistant', content: greeting }]);
+                        speak(greeting);
 
-                    wakeWord.stop();
-                }
-            };
+                        wakeWord.stop();
+                    }
+                };
 
-            wakeWord.onerror = (e) => {
-                if (e.error !== 'no-speech' && e.error !== 'aborted') {
-                    console.warn('Wake word error:', e.error);
-                }
-            };
+                wakeWord.onerror = (e) => {
+                    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+                        console.warn('Wake word error:', e.error);
+                    }
+                };
 
-            wakeWordRecognitionRef.current = wakeWord;
+                wakeWordRecognitionRef.current = wakeWord;
+            }
         } catch (error) {
             console.error('Wake word init failed:', error);
         }
 
         try {
+            // ========== CHAT RECOGNITION (รองรับทั้ง iOS และ Desktop) ==========
             const chatRecognition = new SpeechRecognition();
+
+            // ⚠️ สำคัญ: iOS ต้องเป็น false
             chatRecognition.continuous = false;
             chatRecognition.interimResults = false;
+            chatRecognition.maxAlternatives = 1;
 
             chatRecognition.onstart = () => {
+                console.log('🎤 Recognition started');
                 isRecognitionActive.current = true;
                 setIsListening(true);
+                setMascotAnimation('bounce');
             };
 
             chatRecognition.onend = () => {
+                console.log('🎤 Recognition ended');
                 isRecognitionActive.current = false;
                 setIsListening(false);
+                setMascotAnimation('idle');
             };
 
             chatRecognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                setInputText(transcript);
-                handleSendMessage(transcript);
+                console.log('📝 Recognition result event:', event);
+
+                if (event.results && event.results.length > 0) {
+                    const result = event.results[0];
+                    if (result && result[0]) {
+                        const transcript = result[0].transcript;
+                        console.log('✅ Transcript:', transcript);
+
+                        setInputText(transcript);
+
+                        // ⚠️ iOS: รอให้ recognition จบสนิทก่อนส่งข้อความ
+                        setTimeout(() => {
+                            if (transcript.trim()) {
+                                handleSendMessage(transcript);
+                            }
+                        }, isIOS ? 500 : 100);
+                    }
+                }
             };
 
             chatRecognition.onerror = (e) => {
-                if (e.error !== 'no-speech' && e.error !== 'aborted') {
-                    console.warn('Recognition error:', e.error);
-                }
-                setIsListening(false);
-                isRecognitionActive.current = false;
-            };
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        console.warn('Recognition error:', e.error);
+    }
+    setIsListening(false);
+    isRecognitionActive.current = false;
+};
 
             recognitionRef.current = chatRecognition;
+
+            console.log('✅ Speech Recognition initialized for', isIOS ? 'iOS' : 'Desktop');
         } catch (error) {
             console.error('Chat recognition init failed:', error);
         }
 
         return () => {
-            wakeWordRecognitionRef.current?.stop();
-            recognitionRef.current?.stop();
+            if (wakeWordRecognitionRef.current) {
+                try {
+                    wakeWordRecognitionRef.current.stop();
+                } catch (e) { }
+            }
+            if (recognitionRef.current) {
+                try {
+                    recognitionRef.current.stop();
+                } catch (e) { }
+            }
             stopSpeaking();
         };
     }, [language, speak, stopSpeaking]);
@@ -302,26 +356,60 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
     }, [isExpanded, isListening]);
 
     // ========================== HANDLERS ==========================
-    const toggleListening = useCallback(() => {
-        if (isListening) {
-            recognitionRef.current?.stop();
-        } else {
-            stopSpeaking();
+    const toggleListening = useCallback(async () => {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
-            setTimeout(() => {
-                try {
-                    const langCodes = { th: 'th-TH', en: 'en-US', zh: 'zh-CN', ko: 'ko-KR' };
-                    if (recognitionRef.current) {
-                        recognitionRef.current.lang = langCodes[language] || 'th-TH';
-                        recognitionRef.current.start();
-                    }
-                } catch (e) {
-                    if (!e.message.includes('already started')) {
-                        console.error('Mic start failed:', e);
+        if (isListening) {
+            console.log('🛑 Stopping recognition...');
+            try {
+                recognitionRef.current?.stop();
+            } catch (e) {
+                console.warn('Stop error:', e);
+            }
+            setIsListening(false);
+            setMascotAnimation('idle');
+            return;
+        }
+
+        // ขออนุญาตไมค์
+        
+
+        stopSpeaking();
+
+        // ⚠️ iOS ต้องเริ่ม recognition ทันทีหลัง user gesture
+        setTimeout(() => {
+            try {
+                const langCodes = { th: 'th-TH', en: 'en-US', zh: 'zh-CN', ko: 'ko-KR' };
+                if (recognitionRef.current) {
+                    recognitionRef.current.lang = langCodes[language] || 'th-TH';
+
+                    console.log('🎤 Starting recognition for', langCodes[language]);
+                    recognitionRef.current.start();
+
+                    // iOS: ตั้ง timeout ป้องกันค้าง
+                    if (isIOS) {
+                        setTimeout(() => {
+                            if (isRecognitionActive.current) {
+                                console.log('⏱️ iOS timeout - stopping recognition');
+                                recognitionRef.current?.stop();
+                            }
+                        }, 10000); // 10 วินาที
                     }
                 }
-            }, 200);
-        }
+            } catch (e) {
+                console.error('❌ Start recognition failed:', e);
+
+                if (e.message && !e.message.includes('already started')) {
+                    alert(language === 'th'
+                        ? 'ไม่สามารถเปิดไมค์ได้\n\nลองปิด Safari แล้วเปิดใหม่'
+                        : 'Cannot start microphone\n\nTry closing and reopening Safari');
+                }
+
+                setIsListening(false);
+                setMascotAnimation('idle');
+            }
+        }, isIOS ? 100 : 200); // iOS ต้องเริ่มเร็วกว่า
+
     }, [isListening, language, stopSpeaking]);
 
     const handleSendMessage = useCallback(async (text = inputText) => {
@@ -459,8 +547,8 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                             src="/tiewson.png"
                             alt="น้องทิวสน"
                             className={`w-32 h-32 object-cover rounded-full shadow-2xl border-4 border-white transition-all duration-300 ${mascotAnimation === 'bounce' ? 'animate-bounce' :
-                                    mascotAnimation === 'talking' ? 'scale-105' :
-                                        'hover:scale-110'
+                                mascotAnimation === 'talking' ? 'scale-105' :
+                                    'hover:scale-110'
                                 }`}
                         />
 
@@ -502,19 +590,19 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
 
             {/* ========== CHAT WINDOW WITH LARGE MASCOT ========== */}
             {isExpanded && (
-                <div className="fixed bottom-6 right-6 flex items-end gap-1 z-40">
+                <div className="fixed bottom-6 right-6 flex items-end gap-0 z-40">
                     {/* Large Animated Mascot */}
-                    <div className="relative">
+                    <div className="relative -mr-16">
                         <img
                             src="/tiewson.png"
                             alt="น้องทิวสน"
                             className={`w-[32rem] h-auto object-contain transition-all duration-300 ${isSpeaking ? 'mascot-talking' :
-                                    isProcessing ? 'mascot-wiggle' :
-                                        mascotAnimation === 'bounce' ? 'mascot-bounce' : ''
+                                isProcessing ? 'mascot-wiggle' :
+                                    mascotAnimation === 'bounce' ? 'mascot-bounce' : ''
                                 }`}
                             style={{
                                 filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.25))',
-                                maxHeight: '500px'
+                                maxHeight: '700px'
                             }}
                         />
 
@@ -526,6 +614,8 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                                 </div>
+                                {/* หางลูกศรชี้ลงไปที่หัวน้อง */}
+                                <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white rotate-45 border-r border-b border-blue-50/50"></div>
                             </div>
                         )}
 
@@ -591,10 +681,15 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
 
                         {/* Messages */}
                         <div className="h-80 overflow-y-auto p-4 bg-gray-50">
-                            {isMobileDevice.current && messages.length === 1 && (
-                                <div className="mb-3 text-center">
-                                    <div className="inline-block bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs px-3 py-2 rounded-lg">
-                                        🔊 หาก iOS ไม่มีเสียง กรุณาคลิกปุ่มลำโพงเพื่อเปิดเสียง
+                            {isMobileDevice.current && messages.length === 0 && (
+                                <div className="mb-3">
+                                    <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-3 rounded-lg">
+                                        <p className="font-semibold mb-1">💡 วิธีใช้งานบน iOS:</p>
+                                        <ol className="list-decimal list-inside space-y-1 text-xs">
+                                            <li>กดปุ่มไมค์ 🎤</li>
+                                            <li>พูดทันที (รอไม่เกิน 3 วินาที)</li>
+                                            <li>รอให้จบการฟังอัตโนมัติ</li>
+                                        </ol>
                                     </div>
                                 </div>
                             )}
@@ -606,8 +701,8 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                 >
                                     <div
                                         className={`inline-block max-w-[80%] p-3 rounded-2xl whitespace-pre-wrap ${msg.role === 'user'
-                                                ? 'bg-blue-600 text-white'
-                                                : 'bg-white text-gray-800 shadow-md'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-white text-gray-800 shadow-md'
                                             }`}
                                     >
                                         {msg.content}
@@ -634,10 +729,25 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                         <div className="p-4 bg-white border-t border-gray-200">
                             <div className="flex gap-2">
                                 <button
+                                    onClick={async () => {
+                                        // ทดสอบขออนุญาตไมค์
+                                        const hasPermission = await requestMicrophonePermission();
+                                        if (hasPermission) {
+                                            alert(language === 'th'
+                                                ? '✅ ไมค์พร้อมใช้งาน!'
+                                                : '✅ Microphone ready!');
+                                        }
+                                    }}
+                                    className="p-3 rounded-xl bg-green-100 text-green-600 hover:bg-green-200 transition-all"
+                                    title="ทดสอบไมค์"
+                                >
+                                    🎤
+                                </button>
+                                <button
                                     onClick={toggleListening}
                                     className={`p-3 rounded-xl transition-all ${isListening
-                                            ? 'bg-red-500 text-white scale-110'
-                                            : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                                        ? 'bg-red-500 text-white scale-110'
+                                        : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
                                         }`}
                                     disabled={isProcessing}
                                     aria-label={isListening ? 'Stop listening' : 'Start listening'}
@@ -674,8 +784,8 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                         }
                                     }}
                                     className={`p-3 rounded-xl transition-all ${isSpeaking
-                                            ? 'bg-orange-500 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        ? 'bg-orange-500 text-white'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                     aria-label={isSpeaking ? 'Stop speaking' : 'Test speaker'}
                                     title={isSpeaking ? 'หยุดพูด' : 'ทดสอบเสียง'}
