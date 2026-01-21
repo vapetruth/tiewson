@@ -1,4 +1,4 @@
-// TiewSonAI.js - With Large Animated Mascot
+// TiewSonAI.js - Clean Version with Auto-Restart Wake Word new
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, MicOff, Send, Volume2, VolumeX, Globe } from 'lucide-react';
 
@@ -48,6 +48,7 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
     const isRecognitionActive = useRef(false);
     const isWakeWordActive = useRef(false);
     const isMobileDevice = useRef(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+    const wakeWordRestartTimeoutRef = useRef(null);
 
     // ========================== SPEECH SYNTHESIS ==========================
     const speak = useCallback((text) => {
@@ -84,19 +85,11 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                         setMascotAnimation('idle');
                         return;
                     }
-                    const voices = window.speechSynthesis.getVoices();
-                    const femaleVoice = voices.find(voice =>
-                        (voice.lang === 'th-TH' || voice.lang === 'th_TH') &&
-                        voice.name.toLowerCase().includes('female')
-                    );
-
-                    if (femaleVoice) {
-                        utterance.voice = femaleVoice;
-                    }
+                    
                     const utterance = new SpeechSynthesisUtterance(chunks[currentIndex]);
                     utterance.lang = langCodes[language] || 'th-TH';
-                    utterance.rate = 1.05;
-                    utterance.pitch = 1.25;
+                    utterance.rate = 1.1;
+                    utterance.pitch = 1.5;
                     utterance.volume = 1.0;
 
                     utterance.onstart = () => {
@@ -182,148 +175,7 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
         }
     }, []);
 
-    // ========================== SPEECH RECOGNITION SETUP ==========================
-    useEffect(() => {
-        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-            console.warn('Speech Recognition not supported');
-            return;
-        }
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-        try {
-            const wakeWord = new SpeechRecognition();
-            wakeWord.continuous = true;
-            wakeWord.interimResults = false;
-            wakeWord.lang = 'th-TH';
-
-            wakeWord.onstart = () => {
-                isWakeWordActive.current = true;
-                setIsWakeWordListening(true);
-            };
-
-            wakeWord.onend = () => {
-                isWakeWordActive.current = false;
-                setIsWakeWordListening(false);
-            };
-
-            wakeWord.onresult = (event) => {
-                const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
-
-                if (WAKE_WORDS.some(word => transcript.includes(word))) {
-                    console.log('✅ Wake word detected:', transcript);
-                    setMascotAnimation('bounce');
-                    setTimeout(() => setMascotAnimation('idle'), 1000);
-
-                    setIsExpanded(true);
-                    const greeting = GREETINGS[language];
-                    setMessages([{ role: 'assistant', content: greeting }]);
-                    speak(greeting);
-
-                    wakeWord.stop();
-                }
-            };
-
-            wakeWord.onerror = (e) => {
-                if (e.error !== 'no-speech' && e.error !== 'aborted') {
-                    console.warn('Wake word error:', e.error);
-                }
-            };
-
-            wakeWordRecognitionRef.current = wakeWord;
-        } catch (error) {
-            console.error('Wake word init failed:', error);
-        }
-
-        try {
-            const chatRecognition = new SpeechRecognition();
-            chatRecognition.continuous = false;
-            chatRecognition.interimResults = false;
-
-            chatRecognition.onstart = () => {
-                isRecognitionActive.current = true;
-                setIsListening(true);
-            };
-
-            chatRecognition.onend = () => {
-                isRecognitionActive.current = false;
-                setIsListening(false);
-            };
-
-            chatRecognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                setInputText(transcript);
-                handleSendMessage(transcript);
-            };
-
-            chatRecognition.onerror = (e) => {
-                if (e.error !== 'no-speech' && e.error !== 'aborted') {
-                    console.warn('Recognition error:', e.error);
-                }
-                setIsListening(false);
-                isRecognitionActive.current = false;
-            };
-
-            recognitionRef.current = chatRecognition;
-        } catch (error) {
-            console.error('Chat recognition init failed:', error);
-        }
-
-        return () => {
-            wakeWordRecognitionRef.current?.stop();
-            recognitionRef.current?.stop();
-            stopSpeaking();
-        };
-    }, [language, speak, stopSpeaking]);
-
-    // ========================== WAKE WORD CONTROL ==========================
-    useEffect(() => {
-        const manageWakeWord = () => {
-            if (isExpanded || isListening) {
-                if (isWakeWordActive.current) {
-                    wakeWordRecognitionRef.current?.stop();
-                }
-            } else {
-                if (!isWakeWordActive.current && wakeWordRecognitionRef.current) {
-                    setTimeout(() => {
-                        try {
-                            wakeWordRecognitionRef.current?.start();
-                        } catch (e) {
-                            if (e.message !== 'Failed to execute \'start\' on \'SpeechRecognition\': recognition has already started.') {
-                                console.warn('Wake word start failed:', e.message);
-                            }
-                        }
-                    }, 500);
-                }
-            }
-        };
-
-        manageWakeWord();
-    }, [isExpanded, isListening]);
-
-    // ========================== HANDLERS ==========================
-    const toggleListening = useCallback(() => {
-        if (isListening) {
-            recognitionRef.current?.stop();
-        } else {
-            stopSpeaking();
-
-            setTimeout(() => {
-                try {
-                    const langCodes = { th: 'th-TH', en: 'en-US', zh: 'zh-CN', ko: 'ko-KR' };
-                    if (recognitionRef.current) {
-                        recognitionRef.current.lang = langCodes[language] || 'th-TH';
-                        recognitionRef.current.start();
-                    }
-                } catch (e) {
-                    if (!e.message.includes('already started')) {
-                        console.error('Mic start failed:', e);
-                    }
-                }
-            }, 200);
-        }
-    }, [isListening, language, stopSpeaking]);
-
+    // ========================== MESSAGE HANDLER ==========================
     const handleSendMessage = useCallback(async (text = inputText) => {
         if (!text?.trim() || isProcessing) return;
 
@@ -397,6 +249,222 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
             setTimeout(() => setMascotAnimation('idle'), 1000);
         }
     }, [inputText, isProcessing, language, speak]);
+
+    // ========================== SPEECH RECOGNITION SETUP ==========================
+    useEffect(() => {
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            console.warn('Speech Recognition not supported');
+            return;
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        // Wake Word Recognition
+        try {
+            const wakeWord = new SpeechRecognition();
+            wakeWord.continuous = true;
+            wakeWord.interimResults = false;
+            wakeWord.lang = 'th-TH';
+
+            wakeWord.onstart = () => {
+                isWakeWordActive.current = true;
+                setIsWakeWordListening(true);
+                console.log('🎤 Wake word active');
+            };
+
+            wakeWord.onend = () => {
+                isWakeWordActive.current = false;
+                setIsWakeWordListening(false);
+                console.log('🛑 Wake word ended');
+
+                // Auto-restart if not in chat mode
+                if (!isExpanded && !isListening) {
+                    if (wakeWordRestartTimeoutRef.current) {
+                        clearTimeout(wakeWordRestartTimeoutRef.current);
+                    }
+                    
+                    wakeWordRestartTimeoutRef.current = setTimeout(() => {
+                        if (!isWakeWordActive.current && !isExpanded && !isListening) {
+                            try {
+                                console.log('🔄 Restarting wake word');
+                                wakeWord.start();
+                            } catch (e) {
+                                console.warn('Restart failed:', e.message);
+                            }
+                        }
+                    }, 1500);
+                }
+            };
+
+            wakeWord.onresult = (event) => {
+                const result = event.results[event.results.length - 1][0];
+                const transcript = result.transcript.toLowerCase();
+                const confidence = result.confidence;
+                
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🎤 WAKE WORD - Speech Detected:');
+                console.log('   📝 Transcript:', transcript);
+                console.log('   🎯 Confidence:', (confidence * 100).toFixed(1) + '%');
+                console.log('   🔍 Checking wake words:', WAKE_WORDS);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+                if (WAKE_WORDS.some(word => transcript.includes(word))) {
+                    console.log('✅ WAKE WORD MATCHED! Opening chat...');
+                    
+                    if (wakeWordRestartTimeoutRef.current) {
+                        clearTimeout(wakeWordRestartTimeoutRef.current);
+                    }
+                    
+                    setMascotAnimation('bounce');
+                    setTimeout(() => setMascotAnimation('idle'), 1000);
+
+                    setIsExpanded(true);
+                    const greeting = GREETINGS[language];
+                    setMessages([{ role: 'assistant', content: greeting }]);
+                    speak(greeting);
+
+                    wakeWord.stop();
+                } else {
+                    console.log('❌ No wake word match. Continuing to listen...');
+                }
+            };
+
+            wakeWord.onerror = (e) => {
+                console.log('⚠️ Error:', e.error);
+                
+                if (['no-speech', 'aborted', 'audio-capture'].includes(e.error)) {
+                    return;
+                }
+                
+                if (!isExpanded && !isListening) {
+                    if (wakeWordRestartTimeoutRef.current) {
+                        clearTimeout(wakeWordRestartTimeoutRef.current);
+                    }
+                    
+                    wakeWordRestartTimeoutRef.current = setTimeout(() => {
+                        if (!isWakeWordActive.current) {
+                            try {
+                                console.log('🔄 Restart after error');
+                                wakeWord.start();
+                            } catch (err) {
+                                console.warn('Error restart failed:', err.message);
+                            }
+                        }
+                    }, 2000);
+                }
+            };
+
+            wakeWordRecognitionRef.current = wakeWord;
+        } catch (error) {
+            console.error('Wake word init failed:', error);
+        }
+
+        // Chat Recognition
+        try {
+            const chatRecognition = new SpeechRecognition();
+            chatRecognition.continuous = false;
+            chatRecognition.interimResults = false;
+
+            chatRecognition.onstart = () => {
+                isRecognitionActive.current = true;
+                setIsListening(true);
+            };
+
+            chatRecognition.onend = () => {
+                isRecognitionActive.current = false;
+                setIsListening(false);
+            };
+
+            chatRecognition.onresult = (event) => {
+                const result = event.results[0][0];
+                const transcript = result.transcript;
+                const confidence = result.confidence;
+                
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('💬 CHAT - Speech Detected:');
+                console.log('   📝 Transcript:', transcript);
+                console.log('   🎯 Confidence:', (confidence * 100).toFixed(1) + '%');
+                console.log('   📤 Sending to AI...');
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                setInputText(transcript);
+                handleSendMessage(transcript);
+            };
+
+            chatRecognition.onerror = (e) => {
+                if (e.error !== 'no-speech' && e.error !== 'aborted') {
+                    console.warn('Recognition error:', e.error);
+                }
+                setIsListening(false);
+                isRecognitionActive.current = false;
+            };
+
+            recognitionRef.current = chatRecognition;
+        } catch (error) {
+            console.error('Chat recognition init failed:', error);
+        }
+
+        return () => {
+            if (wakeWordRestartTimeoutRef.current) {
+                clearTimeout(wakeWordRestartTimeoutRef.current);
+            }
+            wakeWordRecognitionRef.current?.stop();
+            recognitionRef.current?.stop();
+            stopSpeaking();
+        };
+    }, [language, speak, stopSpeaking, isExpanded, isListening, handleSendMessage]);
+
+    // ========================== WAKE WORD CONTROL ==========================
+    useEffect(() => {
+        const startWakeWord = () => {
+            if (isExpanded || isListening) {
+                if (isWakeWordActive.current) {
+                    console.log('⏸️ Stopping wake word (chat active)');
+                    wakeWordRecognitionRef.current?.stop();
+                }
+            } else {
+                if (!isWakeWordActive.current && wakeWordRecognitionRef.current) {
+                    setTimeout(() => {
+                        try {
+                            if (!isWakeWordActive.current && !isExpanded && !isListening) {
+                                console.log('▶️ Starting wake word listener');
+                                wakeWordRecognitionRef.current?.start();
+                            }
+                        } catch (e) {
+                            if (!e.message.includes('already started')) {
+                                console.warn('Wake word start failed:', e.message);
+                            }
+                        }
+                    }, 500);
+                }
+            }
+        };
+
+        startWakeWord();
+    }, [isExpanded, isListening]);
+
+    // ========================== HANDLERS ==========================
+    const toggleListening = useCallback(() => {
+        if (isListening) {
+            recognitionRef.current?.stop();
+        } else {
+            stopSpeaking();
+
+            setTimeout(() => {
+                try {
+                    const langCodes = { th: 'th-TH', en: 'en-US', zh: 'zh-CN', ko: 'ko-KR' };
+                    if (recognitionRef.current) {
+                        recognitionRef.current.lang = langCodes[language] || 'th-TH';
+                        recognitionRef.current.start();
+                    }
+                } catch (e) {
+                    if (!e.message.includes('already started')) {
+                        console.error('Mic start failed:', e);
+                    }
+                }
+            }, 200);
+        }
+    }, [isListening, language, stopSpeaking]);
 
     // ========================== AUTO SCROLL ==========================
     useEffect(() => {
@@ -502,9 +570,9 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
 
             {/* ========== CHAT WINDOW WITH LARGE MASCOT ========== */}
             {isExpanded && (
-                <div className="fixed bottom-6 right-6 flex items-end gap-1 z-40">
-                    {/* Large Animated Mascot */}
-                    <div className="relative">
+                <div className="fixed bottom-6 right-6 flex items-end gap-1 z-40 max-w-[calc(100vw-3rem)]">
+                    {/* Large Animated Mascot - Hidden on small screens */}
+                    <div className="relative hidden md:block">
                         <img
                             src="/tiewson.png"
                             alt="น้องทิวสน"
@@ -518,7 +586,6 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                             }}
                         />
 
-                        {/* Speech Bubble Animation */}
                         {isSpeaking && (
                             <div className="absolute top-12 left-1/2 transform -translate-x-1/2 bg-white px-5 py-3 rounded-full shadow-xl animate-pulse z-10">
                                 <div className="flex gap-2">
@@ -529,7 +596,6 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                             </div>
                         )}
 
-                        {/* Listening Indicator */}
                         {isListening && (
                             <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-5 py-2.5 rounded-full shadow-xl animate-pulse flex items-center gap-2 z-10">
                                 <Mic className="w-5 h-5" />
@@ -539,7 +605,6 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                             </div>
                         )}
 
-                        {/* Processing Indicator */}
                         {isProcessing && !isSpeaking && (
                             <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-5 py-2.5 rounded-full shadow-xl flex items-center gap-2 z-10">
                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -550,14 +615,14 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                         )}
                     </div>
 
-                    {/* Chat Window */}
-                    <div className="w-96 bg-white rounded-3xl shadow-2xl overflow-hidden border-2 border-blue-100 mb-4">
+                    {/* Chat Window - Responsive */}
+                    <div className="w-full md:w-96 bg-white rounded-3xl shadow-2xl overflow-hidden border-2 border-blue-100 mb-4">
                         {/* Header */}
                         <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className={`w-3 h-3 rounded-full ${isSpeaking ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></div>
                                 <div>
-                                    <h3 className="text-white font-bold">น้องทิวสน</h3>
+                                    <h3 className="text-white font-bold text-sm md:text-base">น้องทิวสน</h3>
                                     <p className="text-blue-100 text-xs">Lanna Polytechnic Assistant</p>
                                 </div>
                             </div>
@@ -572,7 +637,7 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                     className="text-white hover:bg-blue-800 p-2 rounded-lg transition"
                                     aria-label="Change language"
                                 >
-                                    <Globe className="w-5 h-5" />
+                                    <Globe className="w-4 h-4 md:w-5 md:h-5" />
                                 </button>
 
                                 <button
@@ -588,6 +653,40 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                 </button>
                             </div>
                         </div>
+
+                        {/* Status Indicators for Mobile */}
+                        {(isListening || isProcessing || isSpeaking) && (
+                            <div className="md:hidden bg-gradient-to-r from-blue-50 to-blue-100 px-4 py-2 border-b border-blue-200">
+                                {isListening && (
+                                    <div className="flex items-center gap-2 text-red-600">
+                                        <Mic className="w-4 h-4 animate-pulse" />
+                                        <span className="text-xs font-semibold">
+                                            {language === 'th' ? 'กำลังฟัง...' : 'Listening...'}
+                                        </span>
+                                    </div>
+                                )}
+                                {isProcessing && !isSpeaking && (
+                                    <div className="flex items-center gap-2 text-blue-600">
+                                        <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                        <span className="text-xs font-semibold">
+                                            {language === 'th' ? 'กำลังคิด...' : 'Thinking...'}
+                                        </span>
+                                    </div>
+                                )}
+                                {isSpeaking && (
+                                    <div className="flex items-center gap-2 text-green-600">
+                                        <div className="flex gap-1">
+                                            <div className="w-2 h-2 bg-green-600 rounded-full animate-bounce"></div>
+                                            <div className="w-2 h-2 bg-green-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                                            <div className="w-2 h-2 bg-green-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                                        </div>
+                                        <span className="text-xs font-semibold">
+                                            {language === 'th' ? 'กำลังพูด...' : 'Speaking...'}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Messages */}
                         <div className="h-80 overflow-y-auto p-4 bg-gray-50">
@@ -605,7 +704,7 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                     className={`mb-3 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}
                                 >
                                     <div
-                                        className={`inline-block max-w-[80%] p-3 rounded-2xl whitespace-pre-wrap ${msg.role === 'user'
+                                        className={`inline-block max-w-[85%] p-3 rounded-2xl whitespace-pre-wrap text-sm md:text-base ${msg.role === 'user'
                                                 ? 'bg-blue-600 text-white'
                                                 : 'bg-white text-gray-800 shadow-md'
                                             }`}
@@ -631,18 +730,18 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                         </div>
 
                         {/* Input Controls */}
-                        <div className="p-4 bg-white border-t border-gray-200">
+                        <div className="p-3 md:p-4 bg-white border-t border-gray-200">
                             <div className="flex gap-2">
                                 <button
                                     onClick={toggleListening}
-                                    className={`p-3 rounded-xl transition-all ${isListening
+                                    className={`p-2 md:p-3 rounded-xl transition-all ${isListening
                                             ? 'bg-red-500 text-white scale-110'
                                             : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
                                         }`}
                                     disabled={isProcessing}
                                     aria-label={isListening ? 'Stop listening' : 'Start listening'}
                                 >
-                                    {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                                    {isListening ? <MicOff className="w-4 h-4 md:w-5 md:h-5" /> : <Mic className="w-4 h-4 md:w-5 md:h-5" />}
                                 </button>
 
                                 <input
@@ -651,17 +750,17 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                     onChange={(e) => setInputText(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
                                     placeholder={language === 'th' ? 'พิมพ์ข้อความ...' : 'Type message...'}
-                                    className="flex-1 px-4 py-3 rounded-xl border border-gray-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
+                                    className="flex-1 px-3 md:px-4 py-2 md:py-3 rounded-xl border border-gray-300 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition text-sm md:text-base"
                                     disabled={isProcessing}
                                 />
 
                                 <button
                                     onClick={() => handleSendMessage()}
                                     disabled={!inputText.trim() || isProcessing}
-                                    className="p-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                    className="p-2 md:p-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                     aria-label="Send message"
                                 >
-                                    <Send className="w-5 h-5" />
+                                    <Send className="w-4 h-4 md:w-5 md:h-5" />
                                 </button>
 
                                 <button
@@ -673,14 +772,14 @@ const TiewSonAI = ({ language, onLanguageChange, userProfile }) => {
                                             speak(testMsg);
                                         }
                                     }}
-                                    className={`p-3 rounded-xl transition-all ${isSpeaking
+                                    className={`p-2 md:p-3 rounded-xl transition-all ${isSpeaking
                                             ? 'bg-orange-500 text-white'
                                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                     aria-label={isSpeaking ? 'Stop speaking' : 'Test speaker'}
                                     title={isSpeaking ? 'หยุดพูด' : 'ทดสอบเสียง'}
                                 >
-                                    {isSpeaking ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                                    {isSpeaking ? <VolumeX className="w-4 h-4 md:w-5 md:h-5" /> : <Volume2 className="w-4 h-4 md:w-5 md:h-5" />}
                                 </button>
                             </div>
                         </div>
